@@ -1,154 +1,253 @@
+// main.cpp - 1D GLM-MHD with proper By preservation
 #include <cmath>
 #include <vector>
 #include <fstream>
 #include <iostream>
 #include <filesystem>
 #include <iomanip>
+#include <algorithm>
 #include "physics.hpp"
 
-static constexpr double CFL   = 0.3;
-static constexpr double CR    = 0.18; // c_p^2 / c_h^2
+static constexpr double CFL = 0.3;
+static constexpr double CR = 0.18;
 
-struct Flux {
-    double rho, momx, E, Bx, By, psi;
-};
+// State vector indices
+enum { IRHO=0, IMOMX, IMOMY, IMOMZ, IENER, IBX, IBY, IBZ, IPSI, NVAR };
 
-// Fast magnetosonic speed
-static double fast_speed(double rho,double p,double bx,double by){
-    double a2 = GAMMA * p / rho;
-    double b2 = (bx*bx + by*by)/rho;
-    double bx2 = (bx*bx)/rho;
-    double term = std::sqrt(std::max(0.0,(a2 + b2)*(a2 + b2) - 4*a2*bx2));
-    return std::sqrt(0.5*(a2 + b2 + term));
+// Primitive variables from conservative
+void cons2prim(const double U[NVAR], double& rho, double& u, double& v, double& w,
+               double& p, double& Bx, double& By, double& Bz, double& psi) {
+    rho = U[IRHO];
+    u = U[IMOMX] / rho;
+    v = U[IMOMY] / rho;
+    w = U[IMOMZ] / rho;
+    Bx = U[IBX];
+    By = U[IBY];
+    Bz = U[IBZ];
+    psi = U[IPSI];
+    
+    double v2 = u*u + v*v + w*w;
+    double B2 = Bx*Bx + By*By + Bz*Bz;
+    p = (GAMMA - 1.0) * (U[IENER] - 0.5*rho*v2 - 0.5*B2);
+    p = std::max(p, 1e-10);
 }
 
-static Flux hll_flux(const Cell& L,const Cell& R,double ch){
-    double B2L = L.bx*L.bx + L.by*L.by;
-    double B2R = R.bx*R.bx + R.by*R.by;
-    double ptL = L.p + 0.5*B2L;
-    double ptR = R.p + 0.5*B2R;
-    double EL = L.p/(GAMMA-1.0) + 0.5*L.rho*L.u*L.u + 0.5*B2L;
-    double ER = R.p/(GAMMA-1.0) + 0.5*R.rho*R.u*R.u + 0.5*B2R;
+// Conservative variables from primitive
+void prim2cons(double rho, double u, double v, double w, double p,
+               double Bx, double By, double Bz, double psi, double U[NVAR]) {
+    U[IRHO] = rho;
+    U[IMOMX] = rho * u;
+    U[IMOMY] = rho * v;
+    U[IMOMZ] = rho * w;
+    U[IBX] = Bx;
+    U[IBY] = By;
+    U[IBZ] = Bz;
+    U[IPSI] = psi;
+    
+    double v2 = u*u + v*v + w*w;
+    double B2 = Bx*Bx + By*By + Bz*Bz;
+    U[IENER] = p/(GAMMA-1.0) + 0.5*rho*v2 + 0.5*B2;
+}
 
-    double cfL = fast_speed(L.rho,L.p,L.bx,L.by);
-    double cfR = fast_speed(R.rho,R.p,R.bx,R.by);
-    double SL = std::min(L.u - cfL, R.u - cfR);
-    double SR = std::max(L.u + cfL, R.u + cfR);
+// Compute flux vector
+void compute_flux(double rho, double u, double v, double w, double p,
+                  double Bx, double By, double Bz, double psi, double ch,
+                  double F[NVAR]) {
+    double B2 = Bx*Bx + By*By + Bz*Bz;
+    double ptot = p + 0.5*B2;
+    
+    F[IRHO] = rho * u;
+    F[IMOMX] = rho*u*u + ptot - Bx*Bx;
+    F[IMOMY] = rho*u*v - Bx*By;
+    F[IMOMZ] = rho*u*w - Bx*Bz;
+    
+    double E = p/(GAMMA-1.0) + 0.5*rho*(u*u + v*v + w*w) + 0.5*B2;
+    F[IENER] = u*(E + ptot) - Bx*(u*Bx + v*By + w*Bz);
+    
+    F[IBX] = psi;  // GLM flux
+    F[IBY] = u*By - v*Bx;
+    F[IBZ] = u*Bz - w*Bx;
+    F[IPSI] = ch*ch * Bx;  // GLM flux
+}
 
-    Flux F;
-    if(SL>0){
-        F.rho = L.rho * L.u;
-        F.momx = L.rho*L.u*L.u + ptL - L.bx*L.bx;
-        F.E   = (EL + ptL)*L.u - L.bx*(L.u*L.bx);
-        F.Bx  = L.psi;
-        F.By  = L.u*L.by - 0.0*L.bx; // v=0
-        F.psi = ch*ch*L.bx;
-    }else if(SR<0){
-        F.rho = R.rho * R.u;
-        F.momx = R.rho*R.u*R.u + ptR - R.bx*R.bx;
-        F.E   = (ER + ptR)*R.u - R.bx*(R.u*R.bx);
-        F.Bx  = R.psi;
-        F.By  = R.u*R.by - 0.0*R.bx;
-        F.psi = ch*ch*R.bx;
-    }else{
-        double FL_rho = L.rho*L.u;
-        double FR_rho = R.rho*R.u;
-        double FL_momx = L.rho*L.u*L.u + ptL - L.bx*L.bx;
-        double FR_momx = R.rho*R.u*R.u + ptR - R.bx*R.bx;
-        double FL_E = (EL + ptL)*L.u - L.bx*(L.u*L.bx);
-        double FR_E = (ER + ptR)*R.u - R.bx*(R.u*R.bx);
-        double FL_By = L.u*L.by;
-        double FR_By = R.u*R.by;
-        F.rho = (SR*FL_rho - SL*FR_rho + SL*SR*(R.rho - L.rho))/(SR-SL);
-        F.momx = (SR*FL_momx - SL*FR_momx + SL*SR*(R.rho*R.u - L.rho*L.u))/(SR-SL);
-        F.E   = (SR*FL_E - SL*FR_E + SL*SR*(ER-EL))/(SR-SL);
-        F.Bx  = (SR*L.psi - SL*R.psi + SL*SR*(R.bx - L.bx))/(SR-SL);
-        F.By  = (SR*FL_By - SL*FR_By + SL*SR*(R.by - L.by))/(SR-SL);
-        F.psi = ch*ch*(SR*L.bx - SL*R.bx + SL*SR*(R.psi - L.psi))/(SR-SL);
+// Rusanov (Lax-Friedrichs) flux - more diffusive but more stable
+void rusanov_flux(const double UL[NVAR], const double UR[NVAR], double ch,
+                  double F_interface[NVAR]) {
+    // Left state
+    double rhoL, uL, vL, wL, pL, BxL, ByL, BzL, psiL;
+    cons2prim(UL, rhoL, uL, vL, wL, pL, BxL, ByL, BzL, psiL);
+    
+    // Right state
+    double rhoR, uR, vR, wR, pR, BxR, ByR, BzR, psiR;
+    cons2prim(UR, rhoR, uR, vR, wR, pR, BxR, ByR, BzR, psiR);
+    
+    // Wave speeds
+    double a2L = GAMMA * pL / rhoL;
+    double a2R = GAMMA * pR / rhoR;
+    double CA2L = (BxL*BxL + ByL*ByL + BzL*BzL) / rhoL;
+    double CA2R = (BxR*BxR + ByR*ByR + BzR*BzR) / rhoR;
+    
+    double cfL = std::sqrt(0.5*(a2L + CA2L + 
+                 std::sqrt(std::max(0.0, (a2L+CA2L)*(a2L+CA2L) - 4*a2L*BxL*BxL/rhoL))));
+    double cfR = std::sqrt(0.5*(a2R + CA2R + 
+                 std::sqrt(std::max(0.0, (a2R+CA2R)*(a2R+CA2R) - 4*a2R*BxR*BxR/rhoR))));
+    
+    // Maximum wave speed (including GLM waves)
+    double SL = std::min(uL - cfL, uR - cfR);
+    double SR = std::max(uL + cfL, uR + cfR);
+    double Smax = std::max({std::abs(SL), std::abs(SR), ch});
+    
+    // Left and right fluxes
+    double FL[NVAR], FR[NVAR];
+    compute_flux(rhoL, uL, vL, wL, pL, BxL, ByL, BzL, psiL, ch, FL);
+    compute_flux(rhoR, uR, vR, wR, pR, BxR, ByR, BzR, psiR, ch, FR);
+    
+    // Rusanov flux
+    for (int k = 0; k < NVAR; ++k) {
+        F_interface[k] = 0.5 * (FL[k] + FR[k] - Smax * (UR[k] - UL[k]));
     }
-    return F;
 }
 
-static void write_field(const std::vector<Cell>& U,double x0,double dx,const std::string& prefix,int step){
-    std::ofstream f(prefix+std::to_string(step)+".csv");
-    for(size_t i=1;i<U.size()-1;++i){
-        double x = x0 + (i-1+0.5)*dx;
-        f<<x<<','<<U[i].rho<<','<<U[i].u<<','<<U[i].p<<','<<U[i].bx<<','<<U[i].by<<','<<U[i].psi<<'\n';
+// Write output
+void write_output(const std::vector<double>& U, int nx, double x0, double dx,
+                  const std::string& filename) {
+    std::ofstream f(filename);
+    f << std::scientific << std::setprecision(8);
+    f << "x,rho,u,v,w,p,bx,by,bz,psi,divB\n";
+    
+    for (int i = 1; i < nx+1; ++i) {
+        double x = x0 + (i-0.5)*dx;
+        
+        double rho, u, v, w, p, Bx, By, Bz, psi;
+        cons2prim(&U[NVAR*i], rho, u, v, w, p, Bx, By, Bz, psi);
+        
+        // Compute div B
+        double divB = 0.0;
+        if (i > 1 && i < nx) {
+            divB = (U[NVAR*(i+1) + IBX] - U[NVAR*(i-1) + IBX]) / (2.0*dx);
+        }
+        
+        f << x << ',' << rho << ',' << u << ',' << v << ',' << w << ',' 
+          << p << ',' << Bx << ',' << By << ',' << Bz << ',' << psi << ',' 
+          << divB << '\n';
     }
 }
 
-int main(){
-    const int nx=1024;
-    const double x0=-0.5,x1=0.5;
-    const double dx=(x1-x0)/nx;
-    const double t_end=0.25;
-    const int output_every=20;
+int main() {
+    // Problem parameters
+    const int nx = 800;
+    const double x0 = -0.5, x1 = 0.5;
+    const double dx = (x1 - x0) / nx;
+    const double t_end = 0.2;
+    
+    std::cout << "1D GLM-MHD solver (Dedner et al. 2002)" << std::endl;
+    std::cout << "Method: Mixed GLM with Rusanov flux" << std::endl;
+    std::cout << "Grid: nx = " << nx << ", dx = " << dx << std::endl;
+    
+    // Create output directory
     std::filesystem::create_directory("Result");
-
-    std::vector<Cell> U(nx+2); // ghost cells
-    initialize_riemann_problem(U, x0, dx);
-
-    auto apply_bc=[&](){
-        U[0]=U[1];
-        U[nx+1]=U[nx];
-    };
-    apply_bc();
-
-    double t=0; int step=0;
-    while(t<t_end-1e-12){
-        double max_speed=0.0;
-        for(int i=1;i<=nx;++i){
-            double cf = fast_speed(U[i].rho,U[i].p,U[i].bx,U[i].by);
-            max_speed = std::max(max_speed, std::abs(U[i].u)+cf);
+    
+    // Allocate solution array (including ghost cells)
+    std::vector<double> U((nx+2)*NVAR, 0.0);
+    
+    // Initialize
+    std::vector<Cell> W(nx+2);
+    initialize_riemann_problem(W, x0, dx);
+    
+    // Convert to conservative variables
+    for (int i = 0; i < nx+2; ++i) {
+        prim2cons(W[i].rho, W[i].u, W[i].v, W[i].w, W[i].p,
+                  W[i].bx, W[i].by, W[i].bz, W[i].psi, &U[NVAR*i]);
+    }
+    
+    // Time evolution
+    double t = 0;
+    int step = 0;
+    int output_count = 0;
+    
+    // Initial output
+    write_output(U, nx, x0, dx, "Result/out_state_0.csv");
+    
+    // Check initial By
+    double By_initial = W[nx/2].by;
+    std::cout << "Initial By = " << By_initial << std::endl;
+    
+    while (t < t_end) {
+        // Boundary conditions (transmissive)
+        for (int k = 0; k < NVAR; ++k) {
+            U[k] = U[NVAR + k];
+            U[NVAR*(nx+1) + k] = U[NVAR*nx + k];
         }
-        double ch = 1.5*max_speed;
-        max_speed = std::max(max_speed, ch);
-        double dt = CFL*dx/max_speed;
-        if(t+dt>t_end) dt=t_end-t;
-
-        std::vector<Flux> F(nx+1);
-        for(int i=0;i<=nx;i++){
-            F[i]=hll_flux(U[i],U[i+1],ch);
+        
+        // Maximum wave speed
+        double max_speed = 0;
+        for (int i = 1; i <= nx; ++i) {
+            double rho, u, v, w, p, Bx, By, Bz, psi;
+            cons2prim(&U[NVAR*i], rho, u, v, w, p, Bx, By, Bz, psi);
+            
+            double a2 = GAMMA * p / rho;
+            double CA2 = (Bx*Bx + By*By + Bz*Bz) / rho;
+            double cf2 = 0.5*(a2 + CA2 + std::sqrt(std::max(0.0, 
+                         (a2+CA2)*(a2+CA2) - 4*a2*Bx*Bx/rho)));
+            double cf = std::sqrt(cf2);
+            max_speed = std::max(max_speed, std::abs(u) + cf);
         }
-        std::vector<Cell> Un(nx+2);
-        for(int i=1;i<=nx;++i){
-            Un[i].rho = U[i].rho - dt/dx*(F[i].rho - F[i-1].rho);
-            double mom = U[i].rho*U[i].u - dt/dx*(F[i].momx - F[i-1].momx);
-            Un[i].bx  = U[i].bx - dt/dx*(F[i].Bx - F[i-1].Bx);
-            Un[i].by  = U[i].by - dt/dx*(F[i].By - F[i-1].By);
-            Un[i].psi = U[i].psi - dt/dx*(F[i].psi - F[i-1].psi);
-            double E  = U[i].e  - dt/dx*(F[i].E   - F[i-1].E);
-            Un[i].u   = mom/Un[i].rho;
-            Un[i].e   = E;
+        
+        // GLM wave speed
+        double ch = std::max(max_speed, 1.0) * 1.1;
+        double cp = ch / std::sqrt(CR);
+        
+        // Time step
+        double dt = CFL * dx / std::max(max_speed, ch);
+        if (t + dt > t_end) dt = t_end - t;
+        
+        // Copy current solution
+        std::vector<double> U_old = U;
+        
+        // Update using Rusanov flux
+        for (int i = 1; i <= nx; ++i) {
+            double F_left[NVAR], F_right[NVAR];
+            
+            // Left interface flux
+            rusanov_flux(&U_old[NVAR*(i-1)], &U_old[NVAR*i], ch, F_left);
+            
+            // Right interface flux
+            rusanov_flux(&U_old[NVAR*i], &U_old[NVAR*(i+1)], ch, F_right);
+            
+            // Update
+            for (int k = 0; k < NVAR; ++k) {
+                U[NVAR*i + k] = U_old[NVAR*i + k] - dt/dx * (F_right[k] - F_left[k]);
+            }
+            
+            // Apply mixed GLM correction to psi
+            U[NVAR*i + IPSI] *= std::exp(-dt * ch*ch / (cp*cp));
         }
-        U.swap(Un);
-        apply_bc();
-
-        // GLM divergence cleaning
-        std::vector<Cell> Uc = U;
-        for(int i=1;i<=nx;++i){
-            double divB = (U[i+1].bx - U[i-1].bx)/(2*dx);
-            Uc[i].psi = U[i].psi - dt*(ch*ch*divB + (1.0/CR)*U[i].psi);
-        }
-        for(int i=1;i<=nx;++i){
-            double dpsi_dx = (Uc[i+1].psi - Uc[i-1].psi)/(2*dx);
-            Uc[i].bx = U[i].bx - dt*dpsi_dx;
-        }
-        U.swap(Uc);
-        apply_bc();
-        // update pressure from energy
-        for(int i=1;i<=nx;++i){
-            double B2 = U[i].bx*U[i].bx + U[i].by*U[i].by;
-            double kin = 0.5*U[i].rho*U[i].u*U[i].u;
-            U[i].p = (U[i].e - kin - 0.5*B2)*(GAMMA-1.0);
-            if(U[i].p < 1e-8) U[i].p = 1e-8;
-        }
-
-        t += dt; step++;
-        if(step%output_every==0 || t>=t_end-1e-12){
-            write_field(U,x0,dx,"Result/out_state_",step);
-            std::cout<<"step "<<step<<" t="<<t<<"\n";
+        
+        // Update time
+        t += dt;
+        step++;
+        
+        // Output and diagnostics
+        if (step % 50 == 0 || t >= t_end) {
+            output_count++;
+            write_output(U, nx, x0, dx, 
+                        "Result/out_state_" + std::to_string(output_count*50) + ".csv");
+            
+            // Check By conservation
+            double By_min = 1e10, By_max = -1e10;
+            for (int i = 1; i <= nx; ++i) {
+                double rho, u, v, w, p, Bx, By, Bz, psi;
+                cons2prim(&U[NVAR*i], rho, u, v, w, p, Bx, By, Bz, psi);
+                By_min = std::min(By_min, By);
+                By_max = std::max(By_max, By);
+            }
+            
+            std::cout << "Step " << step << ", t = " << std::setprecision(4) << t
+                     << ", By: [" << By_min << ", " << By_max << "]"
+                     << ", variation = " << std::scientific << (By_max - By_min) << std::endl;
         }
     }
+    
+    std::cout << "\nSimulation complete!" << std::endl;
     return 0;
 }
