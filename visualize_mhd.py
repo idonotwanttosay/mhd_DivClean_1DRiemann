@@ -12,11 +12,20 @@ import os
 
 def load_final_solution(output_dir="Result"):
     """Load the final solution file"""
-    files = sorted(glob.glob(os.path.join(output_dir, "out_state_*.csv")))
+    files = glob.glob(os.path.join(output_dir, "out_state_*.csv"))
     if not files:
         print(f"No output files found in {output_dir}")
         return None
-    
+
+    # Sort numerically by step index (e.g., out_state_50.csv)
+    def step_key(path: str) -> int:
+        fname = os.path.splitext(os.path.basename(path))[0]
+        try:
+            return int(fname.split("_")[-1])
+        except ValueError:
+            return -1
+
+    files.sort(key=step_key)
     # Load the last file (final time)
     final_file = files[-1]
     print(f"Loading final solution from: {final_file}")
@@ -84,7 +93,7 @@ def plot_dedner_figure4_exact(output_dir="Result", save_name="figure4_reproducti
     
     plt.tight_layout()
     plt.savefig(save_name, dpi=300, bbox_inches='tight')
-    plt.show()
+    plt.close()
     
     # Print diagnostics
     print(f"\nSolution at t = 0.2:")
@@ -158,7 +167,7 @@ def plot_reference_comparison(output_dir="Result"):
     plt.suptitle('1D MHD Riemann Problem - Comparison with Expected Values', fontsize=14)
     plt.tight_layout()
     plt.savefig('reference_comparison.png', dpi=300, bbox_inches='tight')
-    plt.show()
+    plt.close()
 
 def check_dedner_values():
     """Print expected values from Dedner Figure 4"""
