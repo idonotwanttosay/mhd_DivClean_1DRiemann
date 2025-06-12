@@ -4,14 +4,10 @@
 #include <iostream>
 #include <filesystem>
 #include <iomanip>
+#include "physics.hpp"
 
-static constexpr double GAMMA = 5.0/3.0;
 static constexpr double CFL   = 0.3;
 static constexpr double CR    = 0.18; // c_p^2 / c_h^2
-
-struct Cell {
-    double rho, u, p, e, bx, by, psi;
-};
 
 struct Flux {
     double rho, momx, E, Bx, By, psi;
@@ -90,26 +86,7 @@ int main(){
     std::filesystem::create_directory("Result");
 
     std::vector<Cell> U(nx+2); // ghost cells
-    for(int i=0;i<nx+2;++i){
-        double x = x0 + (i-1+0.5)*dx;
-        Cell c;
-        if(x<0){
-            c.rho=1.0;
-            c.u=10.0;
-            c.by=5.0/std::sqrt(4*M_PI);
-            c.bx=5.0/std::sqrt(4*M_PI);
-            c.p=20.0;
-        }else{
-            c.rho=1.0;
-            c.u=-10.0;
-            c.by=5.0/std::sqrt(4*M_PI);
-            c.bx=5.0/std::sqrt(4*M_PI);
-            c.p=0.0;
-        }
-        c.e = c.p/(GAMMA-1.0) + 0.5*c.rho*c.u*c.u + 0.5*(c.bx*c.bx + c.by*c.by);
-        c.psi=0.0;
-        U[i]=c;
-    }
+    initialize_riemann_problem(U, x0, dx);
 
     auto apply_bc=[&](){
         U[0]=U[1];
