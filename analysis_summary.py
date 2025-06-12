@@ -8,9 +8,11 @@ if not steps:
     raise SystemExit("No output found")
 
 xs, ys = pp.read_grid("rho")
+is1d = ys is None
 DX = xs[1] - xs[0]
-DY = ys[1] - ys[0]
-NX, NY = len(xs), len(ys)
+if not is1d:
+    DY = ys[1] - ys[0]
+NX = len(xs)
 
 
 def load(step: int, prefix: str) -> np.ndarray:
@@ -22,13 +24,18 @@ div_l2 = []
 for s in steps:
     rho = load(s, "rho")
     e = load(s, "e")
-    mass.append(rho.sum() * DX * DY)
-    energy.append(e.sum() * DX * DY)
-
-    bx = load(s, "bx")
-    by = load(s, "by")
-    div = (np.roll(bx, -1, 1) - np.roll(bx, 1, 1)) / (2 * DX) + \
-          (np.roll(by, -1, 0) - np.roll(by, 1, 0)) / (2 * DY)
+    if is1d:
+        mass.append(rho.sum() * DX)
+        energy.append(e.sum() * DX)
+        bx = load(s, "bx")
+        div = (np.roll(bx, -1) - np.roll(bx, 1)) / (2 * DX)
+    else:
+        mass.append(rho.sum() * DX * DY)
+        energy.append(e.sum() * DX * DY)
+        bx = load(s, "bx")
+        by = load(s, "by")
+        div = (np.roll(bx, -1, 1) - np.roll(bx, 1, 1)) / (2 * DX) + \
+              (np.roll(by, -1, 0) - np.roll(by, 1, 0)) / (2 * DY)
     div_l2.append(np.sqrt(np.mean(div ** 2)))
 
 print(f"Mass change: {mass[0]:.6g} -> {mass[-1]:.6g}")
