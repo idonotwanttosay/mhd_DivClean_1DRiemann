@@ -1,7 +1,7 @@
 #!/bin/bash
 set -e
 mkdir -p build
-g++ -O3 -fopenmp *.cpp -o riemann1d
+g++ -O3 -fopenmp main.cpp physics.cpp -o riemann1d
 export OMP_NUM_THREADS=${OMP_NUM_THREADS:-1}
 ./riemann1d
 
@@ -10,4 +10,3 @@ python3 analysis_spectrum.py
 python3 analysis_divergence.py
 python3 analysis_conservation.py
 python3 analysis_summary.py
-python3 animate_amr.py
