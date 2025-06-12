@@ -31,8 +31,8 @@ def load_final_solution(output_dir="Result"):
     print(f"Loading final solution from: {final_file}")
     return pd.read_csv(final_file)
 
-def plot_dedner_figure4_exact(output_dir="Result", save_name="figure4_reproduction.png"):
-    """Create a plot exactly like Figure 4 in Dedner et al. 2002"""
+def plot_dedner_figure4_exact(output_dir="Result", save_name="figure4_reproduction.png", title="final step"):
+    """Create a plot exactly like Figure 4 in Dedner et al. 2002."""
     
     # Load data
     data = load_final_solution(output_dir)
@@ -92,6 +92,7 @@ def plot_dedner_figure4_exact(output_dir="Result", save_name="figure4_reproducti
     ax.legend(loc='best', fontsize=8)
     
     plt.tight_layout()
+    plt.suptitle(title, fontsize=14)
     plt.savefig(save_name, dpi=300, bbox_inches='tight')
     plt.close()
     
@@ -185,11 +186,6 @@ def check_dedner_values():
     print("fundamental issue with the flux calculation.")
 
 if __name__ == "__main__":
-    # Create plots
+    # Create the final-step plot only
     plot_dedner_figure4_exact()
-    plot_reference_comparison()
-    check_dedner_values()
-    
-    print("\nPlots saved as:")
-    print("  - figure4_reproduction.png (matches paper layout)")
-    print("  - reference_comparison.png (with expected values)")
+    print("\nPlot saved as figure4_reproduction.png")
