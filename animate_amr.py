@@ -10,6 +10,9 @@ if not steps:
     raise SystemExit("no output")
 
 xs, ys = pp.read_grid("rho")
+if ys is None:
+    print("Animation skipped for 1D data")
+    raise SystemExit
 X, Y = np.meshgrid(xs, ys)
 
 fig, ax = plt.subplots(figsize=(6,5))

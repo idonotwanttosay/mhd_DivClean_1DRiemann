@@ -1,9 +1,9 @@
 #!/bin/bash
 set -e
 mkdir -p build
-g++-14 -O3 -fopenmp *.cpp -o ns2d
+g++ -O3 -fopenmp *.cpp -o riemann1d
 export OMP_NUM_THREADS=${OMP_NUM_THREADS:-1}
-./ns2d
+./riemann1d
 
 python3 plot_density.py
 python3 analysis_spectrum.py

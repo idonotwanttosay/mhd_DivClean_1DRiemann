@@ -10,8 +10,10 @@ if not steps:
     raise RuntimeError("No B field output found. Did you recompile & rerun the solver?")
 
 xs, ys = pp.read_grid("bx")
+is1d = ys is None
 dx = xs[1] - xs[0]
-dy = ys[1] - ys[0]
+if not is1d:
+    dy = ys[1] - ys[0]
 
 def load(step: int, prefix: str) -> np.ndarray:
     return pp.load_field(prefix, step, xs, ys)
@@ -19,11 +21,14 @@ def load(step: int, prefix: str) -> np.ndarray:
 l2 = []
 for s in steps:
     bx = load(s, "bx")
-    by = load(s, "by")
-    div = (np.roll(bx, -1, 1) - np.roll(bx, 1, 1)) / (2 * dx) + (
-        np.roll(by, -1, 0) - np.roll(by, 1, 0)
-    ) / (2 * dy)
-    l2.append(np.sqrt(np.mean(div ** 2)))
+    if is1d:
+        div = (np.roll(bx, -1) - np.roll(bx, 1)) / (2*dx)
+    else:
+        by = load(s, "by")
+        div = (np.roll(bx, -1, 1) - np.roll(bx, 1, 1)) / (2 * dx) + (
+            np.roll(by, -1, 0) - np.roll(by, 1, 0)
+        ) / (2 * dy)
+    l2.append(np.sqrt(np.mean(div**2)))
 
 plt.semilogy(steps,l2,'o-')
 plt.xlabel("step"); plt.ylabel("L2(∇·B)")

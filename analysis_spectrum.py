@@ -10,6 +10,9 @@ if not steps:
     raise SystemExit("No velocity output found.")
 
 xs, ys = pp.read_grid("u")
+if ys is None:
+    print("Spectrum analysis skipped for 1D data")
+    raise SystemExit
 nx = len(xs)
 ny = len(ys)
 

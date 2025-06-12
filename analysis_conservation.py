@@ -10,8 +10,10 @@ if not steps:
     raise SystemExit("No output found")
 
 xs, ys = pp.read_grid("rho")
+is1d = ys is None
 DX = xs[1] - xs[0]
-DY = ys[1] - ys[0]
+if not is1d:
+    DY = ys[1] - ys[0]
 
 def load(step: int, prefix: str) -> np.ndarray:
     return pp.load_field(prefix, step, xs, ys)
@@ -20,8 +22,12 @@ mass=[]; energy=[]
 for s in steps:
     rho = load(s, "rho")
     e   = load(s, "e")
-    mass.append(rho.sum()*DX*DY)
-    energy.append(e.sum()*DX*DY)
+    if is1d:
+        mass.append(rho.sum()*DX)
+        energy.append(e.sum()*DX)
+    else:
+        mass.append(rho.sum()*DX*DY)
+        energy.append(e.sum()*DX*DY)
 
 plt.plot(steps, mass, label='mass')
 plt.plot(steps, energy, label='energy')
