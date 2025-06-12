@@ -91,8 +91,8 @@ def plot_dedner_figure4_exact(output_dir="Result", save_name="figure4_reproducti
                label=f'Initial: {By_init:.3f}')
     ax.legend(loc='best', fontsize=8)
     
-    plt.tight_layout()
-    plt.suptitle(title, fontsize=14)
+    fig.suptitle(title, fontsize=14)
+    plt.tight_layout(rect=[0, 0.03, 1, 0.95])
     plt.savefig(save_name, dpi=300, bbox_inches='tight')
     plt.close()
     
@@ -165,8 +165,8 @@ def plot_reference_comparison(output_dir="Result"):
     ax.legend()
     ax.set_title('y-Magnetic Field')
     
-    plt.suptitle('1D MHD Riemann Problem - Comparison with Expected Values', fontsize=14)
-    plt.tight_layout()
+    fig.suptitle('1D MHD Riemann Problem - Comparison with Expected Values', fontsize=14)
+    plt.tight_layout(rect=[0, 0.03, 1, 0.95])
     plt.savefig('reference_comparison.png', dpi=300, bbox_inches='tight')
     plt.close()
 
