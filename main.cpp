@@ -28,7 +28,8 @@ void cons2prim(const double U[NVAR], double& rho, double& u, double& v, double& 
     
     double v2 = u*u + v*v + w*w;
     double B2 = Bx*Bx + By*By + Bz*Bz;
-    p = (GAMMA - 1.0) * (U[IENER] - 0.5*rho*v2 - 0.5*B2);
+    double psi2 = psi*psi;
+    p = (GAMMA - 1.0) * (U[IENER] - 0.5*rho*v2 - 0.5*B2 - 0.5*psi2);
     p = std::max(p, 1e-10);
 }
 
@@ -46,7 +47,7 @@ void prim2cons(double rho, double u, double v, double w, double p,
     
     double v2 = u*u + v*v + w*w;
     double B2 = Bx*Bx + By*By + Bz*Bz;
-    U[IENER] = p/(GAMMA-1.0) + 0.5*rho*v2 + 0.5*B2;
+    U[IENER] = p/(GAMMA-1.0) + 0.5*rho*v2 + 0.5*B2 + 0.5*psi*psi;
 }
 
 // Compute flux vector
@@ -54,15 +55,16 @@ void compute_flux(double rho, double u, double v, double w, double p,
                   double Bx, double By, double Bz, double psi, double ch,
                   double F[NVAR]) {
     double B2 = Bx*Bx + By*By + Bz*Bz;
-    double ptot = p + 0.5*B2;
+    double ptot = p + 0.5*(B2 + psi*psi);
     
     F[IRHO] = rho * u;
     F[IMOMX] = rho*u*u + ptot - Bx*Bx;
     F[IMOMY] = rho*u*v - Bx*By;
     F[IMOMZ] = rho*u*w - Bx*Bz;
     
-    double E = p/(GAMMA-1.0) + 0.5*rho*(u*u + v*v + w*w) + 0.5*B2;
-    F[IENER] = u*(E + ptot) - Bx*(u*Bx + v*By + w*Bz);
+    double E = p/(GAMMA-1.0) + 0.5*rho*(u*u + v*v + w*w) + 0.5*B2
+               + 0.5*psi*psi;
+    F[IENER] = u*(E + ptot) - Bx*(u*Bx + v*By + w*Bz) + psi*Bx;
     
     F[IBX] = psi;  // GLM flux
     F[IBY] = u*By - v*Bx;

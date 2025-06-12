@@ -39,7 +39,8 @@ void initialize_riemann_problem(std::vector<Cell>& U, double x0, double dx) {
         // Compute total energy
         double B2 = c.bx*c.bx + c.by*c.by + c.bz*c.bz;
         double v2 = c.u*c.u + c.v*c.v + c.w*c.w;
-        c.e = c.p / (GAMMA - 1.0) + 0.5 * c.rho * v2 + 0.5 * B2;
+        c.e = c.p / (GAMMA - 1.0) + 0.5 * c.rho * v2 + 0.5 * B2
+            + 0.5 * c.psi * c.psi;
         
         U[i] = c;
     }
